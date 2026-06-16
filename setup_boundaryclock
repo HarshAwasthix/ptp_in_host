@@ -1,0 +1,121 @@
+#!/bin/bash
+
+set -e
+
+# ============================================================================
+
+# Boundary Clock Setup (Automatic BC using linuxptp)
+
+#
+
+# enp3s0    -> upstream port (SLAVE to grandmaster / WR switch)
+
+# enp4s0f2  -> downstream port (MASTER to cameras)
+
+# ============================================================================
+
+IFACE_SLAVE="enp7s0"
+IP_SLAVE="19.1.11.4/24"
+
+IFACE_MASTER="enp5s0"
+IP_MASTER="19.1.12.5/24"
+
+echo "========================================================"
+echo "Starting Automatic PTP Boundary Clock"
+echo "Slave interface : $IFACE_SLAVE ($IP_SLAVE)"
+echo "Master interface: $IFACE_MASTER ($IP_MASTER)"
+echo "========================================================"
+
+# ----------------------------------------------------------------------------
+
+# Bring interfaces up
+
+# ----------------------------------------------------------------------------
+
+sudo ip link set "$IFACE_SLAVE" up
+sudo ip addr replace "$IP_SLAVE" dev "$IFACE_SLAVE"
+
+sudo ip link set "$IFACE_MASTER" up
+sudo ip addr replace "$IP_MASTER" dev "$IFACE_MASTER"
+
+# ----------------------------------------------------------------------------
+
+# Stop NTP/timesyncd to avoid fighting with PTP
+
+# ----------------------------------------------------------------------------
+
+echo "Disabling system time synchronization..."
+sudo timedatectl set-ntp false || true
+
+# ----------------------------------------------------------------------------
+
+# Generate ptp4l BC configuration
+
+# ----------------------------------------------------------------------------
+
+
+# ----------------------------------------------------------------------------
+
+# Kill previous instances
+
+# ----------------------------------------------------------------------------
+
+echo "Stopping existing ptp4l/phc2sys..."
+
+sudo killall -q ptp4l || true
+sudo killall -q phc2sys || true
+sleep 2
+
+# ----------------------------------------------------------------------------
+
+# Start ptp4l (Automatic Boundary Clock)
+
+# ----------------------------------------------------------------------------
+
+echo "Starting ptp4l..."
+
+sudo ptp4l -f /etc/ptp4l.conf -m > /var/log/ptp4l.log 2>&1 &
+
+sleep 5
+
+# ----------------------------------------------------------------------------
+
+# Start phc2sys in automatic mode
+
+# ----------------------------------------------------------------------------
+
+echo "Starting phc2sys..."
+
+sudo phc2sys -a -m -S 0.00002 > /var/log/phc2sys.log 2>&1 &
+
+sleep 2
+
+# ----------------------------------------------------------------------------
+
+# Verify timestamping capability
+
+# ----------------------------------------------------------------------------
+
+echo ""
+echo "Hardware timestamp support"
+
+echo "---- $IFACE_SLAVE ----"
+ethtool -T "$IFACE_SLAVE" | grep -E 
+"hardware-transmit|hardware-receive|hardware-raw-clock" || true
+
+echo ""
+echo "---- $IFACE_MASTER ----"
+ethtool -T "$IFACE_MASTER" | grep -E 
+"hardware-transmit|hardware-receive|hardware-raw-clock" || true
+
+echo ""
+echo "========================================================"
+echo "Boundary clock started"
+echo ""
+echo "Logs:"
+echo "  sudo tail -f /var/log/ptp4l.log"
+echo "  sudo tail -f /var/log/phc2sys.log"
+echo ""
+echo "Check sync:"
+echo "  pmc -u -b 0 'GET CURRENT_DATA_SET'"
+echo "========================================================"
